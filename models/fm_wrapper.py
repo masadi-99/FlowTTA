@@ -67,7 +67,10 @@ class ChronosWrapper:
             self._encoder_module = model
 
         def hook_fn(module, input, output):
-            if isinstance(output, tuple):
+            # Handle different output types from transformer encoders
+            if hasattr(output, 'last_hidden_state'):
+                self._embeddings['encoder'] = output.last_hidden_state
+            elif isinstance(output, tuple):
                 self._embeddings['encoder'] = output[0]
             else:
                 self._embeddings['encoder'] = output
