@@ -1,147 +1,119 @@
 # FlowTTA: Label-Free Test-Time Adaptation for Time Series Foundation Models
 
-**Status: Round 3 Complete — Key findings crystallized**
+**Status: Round 4 Complete — NO-GO for method paper, pivoting to analysis contribution**
 
 ## The Idea
 
-Time series foundation models (TSFMs) are deployed zero-shot but degrade under distribution shift. All existing test-time adaptation (TTA) methods for time series require ground-truth labels. We propose **label-free TTA** by training a tiny adapter using self-supervised losses that exploit temporal structure. The adapter is trained *at test time* on each batch of shifted data, then discarded.
+Time series foundation models (TSFMs) are deployed zero-shot but degrade under distribution shift. We explored **label-free TTA** by training a tiny adapter using self-supervised losses (multi-horizon reconstruction) at test time. Across 4 rounds of increasingly rigorous experiments, we found that **the method doesn't reliably add value over simpler baselines** — but the analysis of when normalization fails for TSFMs is a genuine contribution.
 
 ---
 
-## Round 3 Results: The Pivot (Latest)
+## Round 4: Definitive Results (16hr, chronos-t5-small)
 
-**Setup:** Chronos-T5-Tiny, ETTh1/ETTh2, 30 windows, 20 samples, 3 seeds, ~195 min runtime.
+**Setup:** Chronos-T5-Small (46M params), ETTh1, 80 windows, 20 samples, 5 seeds, MLP adapter (97 params), multi-horizon reconstruction loss (K=12,24,48).
 
-### Exp A: Shifts Where RevIN Fails
+### R4.1: All 8 Shift Types (mean +/- std over 5 seeds)
 
-We tested on shift types that RevIN structurally cannot handle:
-
-| Method | Mean | Trend-Intra | Frequency | Autocorr. | **Outlier** |
-|--------|------|-------------|-----------|-----------|-------------|
-| Zero-shot | 21.94+/-0.05 | 18.12+/-0.26 | 7.02+/-0.27 | 3.01+/-0.15 | 2.57+/-0.18 |
-| RevIN | 21.25+/-0.11 | 16.95+/-0.34 | 6.32+/-0.12 | 2.79+/-0.05 | **2.95+/-0.17** |
-| Ours (recon) | 22.28+/-0.30 | 17.53+/-0.39 | 7.39+/-0.26 | 3.13+/-0.07 | 2.59+/-0.11 |
-| RevIN+Ours | 21.60+/-0.22 | 17.23+/-0.11 | 6.33+/-0.16 | 2.84+/-0.04 | **2.94+/-0.16** |
+| Method | Mean | Variance | Trend | Trend-Intra | Frequency | Autocorr. | Outlier |
+|--------|------|----------|-------|-------------|-----------|-----------|---------|
+| Zero-shot | 20.30+/-0.17 | 7.39+/-0.11 | 18.66+/-0.11 | 17.50+/-0.11 | 10.87+/-0.11 | 2.11+/-0.05 | 2.23+/-0.10 |
+| RevIN | 19.54+/-0.13 | 7.21+/-0.17 | 18.21+/-0.14 | 16.37+/-0.13 | 10.09+/-0.09 | 2.26+/-0.01 | 2.29+/-0.07 |
+| **Ours** | 20.30+/-0.25 | **7.18+/-0.12** | 18.76+/-0.24 | 17.60+/-0.13 | 11.03+/-0.20 | **2.10+/-0.07** | **2.21+/-0.04** |
+| RevIN+Ours | **19.47+/-0.21** | 7.47+/-0.16 | **18.18+/-0.12** | **16.25+/-0.11** | 10.15+/-0.03 | 2.26+/-0.06 | 2.35+/-0.08 |
 
 **vs Zero-Shot (%):**
 
-| Method | Mean | Trend-Intra | Frequency | Autocorr. | **Outlier** |
-|--------|------|-------------|-----------|-----------|-------------|
-| RevIN | +3.2% | +6.5% | +10.0% | +7.2% | **-14.4%** |
-| Ours (recon) | -1.5% | +3.3% | -5.2% | -4.2% | -0.5% |
-| RevIN+Ours | +1.6% | +4.9% | +9.9% | +5.7% | **-14.1%** |
+| Method | Mean | Variance | Trend | Trend-Intra | Frequency | Autocorr. | Outlier |
+|--------|------|----------|-------|-------------|-----------|-----------|---------|
+| RevIN | +3.7% | +2.4% | +2.4% | +6.4% | +7.2% | **-7.0%** | -2.7% |
+| Ours | +0.0% | **+2.8%** | -0.6% | -0.6% | -1.4% | **+0.5%** | **+0.9%** |
+| RevIN+Ours | **+4.1%** | -1.0% | **+2.5%** | **+7.1%** | +6.7% | -7.1% | -5.1% |
 
-**Key finding:** RevIN **fails catastrophically on outlier shifts** (-14.4%) because outliers corrupt its mean/std computation. Our method is robust to outliers but doesn't significantly outperform zero-shot on other structural shifts.
+**Worst-case degradation:**
+- Zero-shot: 0.0% (baseline)
+- RevIN: **-7.0%** (autocorrelation)
+- **Ours: -1.4%** (frequency) — best worst-case
+- RevIN+Ours: -7.1% (autocorrelation)
 
-### Exp C: Cross-Dataset Natural Shift (ETTh1 → ETTh2)
+### R4.4: Cross-Dataset Natural Shift
 
-**The most important result of the entire study.**
+| Method | ETTh1 | ETTh2 | Weather |
+|--------|-------|-------|---------|
+| Zero-shot | 2.16 | 23.48 | 1.03 |
+| RevIN | 2.29 | **21.57** | 1.14 |
+| **Ours** | **2.09** | 24.37 | **1.04** |
+| RevIN+Ours | 2.35 | **21.56** | 1.17 |
 
-| Method | ETTh1 MSE | ETTh2 MSE | ETTh2 vs Zero-Shot |
-|--------|-----------|-----------|-------------------|
-| Zero-shot | 2.76 | 12.80 | baseline |
-| **RevIN** | 2.70 | **19.49** | **-52.3%** |
-| Ours (recon) | 2.71 | 13.68 | -6.8% |
-| RevIN+Ours | 2.93 | 17.55 | -37.1% |
+**vs Zero-Shot:**
 
-**RevIN destroys performance on cross-dataset transfer** (-52.3%). The normalization removes domain-specific information that the FM needs. Our reconstruction-based adapter degrades only slightly (-6.8%) and dramatically outperforms RevIN on natural shifts.
-
-### Exp D: Reconstruction Loss Variants
-
-| Variant | Trend-Intra MSE | Freq MSE |
-|---------|----------------|----------|
-| Zero-shot | 17.92+/-0.18 | 7.21+/-0.12 |
-| RevIN | 17.16+/-0.06 | 6.40+/-0.09 |
-| Recon (single) | 18.12+/-0.18 | 7.20+/-0.17 |
-| **Recon (multi-hz)** | **17.82+/-0.16** | **7.14+/-0.32** |
-| **Recon (bidirectional)** | **17.57+/-0.05** | 7.15+/-0.24 |
-
-**Bidirectional reconstruction** is the best variant: +2.0% vs zero-shot on trend-intrawindow with very low variance (+/-0.05). Multi-horizon also shows improvement on both shift types.
-
-### Exp E: Embedding-Level Adaptation
-
-| Method | Trend-Intra MSE | Freq MSE |
-|--------|----------------|----------|
-| Zero-shot | 18.14+/-0.15 | 6.92+/-0.26 |
-| RevIN | 17.13+/-0.12 | 6.38+/-0.08 |
-| Recon (input) | 17.89+/-0.10 | 7.19+/-0.32 |
-| Hybrid (embedding) | 17.75+/-0.22 | 7.36+/-0.46 |
-
-Hybrid embedding adapter shows +2.2% on trend-intrawindow but high variance on frequency (+/-0.46). The embedding-level signal exists but is unreliable with current architecture.
+| Method | ETTh1 | ETTh2 | Weather |
+|--------|-------|-------|---------|
+| RevIN | -5.6% | **+8.1%** | -10.8% |
+| **Ours** | **+3.3%** | -3.8% | -0.4% |
+| RevIN+Ours | -8.6% | +8.2% | -13.6% |
 
 ---
 
-## Assessment: Conditional GO
+## What We Learned (The Actual Contribution)
 
-### What we proved
+### 1. RevIN Has Systematic Failure Modes for TSFMs
 
-1. **RevIN has critical failure modes**: -14.4% on outliers, **-52.3% on cross-dataset transfer**. This is a real finding that challenges the common assumption that RevIN is a reliable baseline for TTA.
+RevIN helps on moment-based shifts (mean +3.7%, frequency +7.2%) but **hurts on autocorrelation (-7.0%), ETTh1 in-domain (-5.6%), and Weather (-10.8%)**. This is poorly documented in the TSFM literature.
 
-2. **Our reconstruction loss is robust where RevIN fails**: On ETTh2 (natural shift), our method degrades only -6.8% vs RevIN's catastrophic -52.3%. On outlier shifts, our method is stable while RevIN breaks.
+| Shift Type | RevIN Handles? | Empirical Result |
+|------------|---------------|------------------|
+| Mean shift | Yes | +3.7% |
+| Variance scaling | Yes | +2.4% |
+| Trend | Partially | +2.4% |
+| Intra-window trend | Partially | +6.4% |
+| Frequency change | No (but helps) | +7.2% |
+| Autocorrelation | **No — HARMFUL** | **-7.0%** |
+| Outlier injection | **No** | -2.7% |
+| In-domain (ETTh1) | **HARMFUL** | **-5.6%** |
+| Cross-domain (Weather) | **HARMFUL** | **-10.8%** |
 
-3. **Bidirectional reconstruction is the best loss variant**: Consistent +2% improvement with lowest variance across seeds.
+### 2. Self-Supervised Reconstruction Has the Best Worst-Case
 
-4. **The problem is massive**: TSFMs degrade 200-1500% under shift. This is not an edge case.
+Our method's worst-case is only -1.4% (vs RevIN's -7.0%). It's the **safest** approach. On in-domain data (ETTh1), ours actually improves by +3.3% while RevIN degrades -5.6%.
 
-### The paper angle
+### 3. The Two Methods Are Complementary But Stacking Doesn't Help
 
-The story is NOT "our method beats RevIN everywhere." The story is:
+RevIN+Ours beats RevIN on mean (+0.3%), trend (+0.2%), and trend-intra (+0.7%), but inherits RevIN's failure modes on autocorrelation and outlier. The stacking doesn't provide the "best of both worlds" we hoped for.
 
-> **RevIN is the default preprocessing for time series TTA, but it has critical failure modes on outliers and cross-domain transfer. We propose a self-supervised alternative based on the FM's own leave-last-out reconstruction that is robust across shift types where RevIN fails.**
+### 4. The Self-Supervised Signal Is Real But Weak
 
-This positions the contribution as:
-- **Empirical finding**: RevIN's failure modes on TSFMs (novel — hasn't been shown for foundation models)
-- **Robust alternative**: Self-supervised reconstruction loss that uses the FM's own knowledge
-- **Complementary, not competing**: On moment-based shifts, use RevIN. On structural/natural shifts, use ours. Detection of shift type determines which to apply.
-
-### Remaining risks for NeurIPS
-- Improvements on structural shifts are modest (+2-3%) — need to show larger gains on more datasets
-- Need results on 2+ foundation models
-- Need TTFBench or other established shift benchmarks for reviewer credibility
-
----
-
-## Round 2 Results (Rigorous, Superseded by Round 3)
-
-<details>
-<summary>Click to expand</summary>
-
-30 windows, 20 samples, 3 seeds. Tested on mean shift where RevIN dominates. Best result: reconstruction loss +1.1% vs zero-shot, but nothing beat RevIN. This motivated the Round 3 pivot to RevIN-breaking shifts.
-
-</details>
-
-## Round 1 Results (Preliminary, Superseded)
-
-<details>
-<summary>Click to expand</summary>
-
-8 windows, 5 samples. Showed +23.6% for MLP adapter, but this was variance from small sample size.
-
-</details>
+Multi-horizon reconstruction produces genuine gradient signal (+2.8% on variance, +0.5% on autocorrelation, +0.9% on outlier, +3.3% on in-domain). But the gains are consistently modest and don't exceed RevIN's gains on the shifts where RevIN works.
 
 ---
 
-## Project Structure
+## Honest Assessment
 
-```
-FlowTTA/
-├── config/default.yaml
-├── data/
-│   ├── load_etth.py             # ETTh1/ETTh2 loader
-│   └── synthetic_shift.py       # 8 shift types (mean, variance, trend, trend_intra,
-│                                #   frequency, autocorrelation, outlier)
-├── models/
-│   ├── fm_wrapper.py            # Chronos wrapper with embedding hooks
-│   ├── adapters.py              # Affine, MLP, Flow, Input adapters
-│   └── losses.py                # Self-supervised losses
-├── experiments/                 # Round 1 individual scripts
-├── evaluate.py
-├── run_fast.py                  # Round 2 runner
-├── run_round3.py                # Round 3 runner (latest)
-├── results.json                 # Round 1 results
-├── results_r2.json              # Round 2 results
-└── results_r3.json              # Round 3 results
-```
+### Why This Is NOT a Method Paper
+
+The self-supervised adaptation method doesn't produce strong enough improvements. On the 7 synthetic shifts, "ours" beats zero-shot on only 3 shifts by tiny margins (0.5-2.8%). RevIN, despite its failure modes, has larger positive effects where it works.
+
+### What IS Publishable
+
+**An analysis paper on normalization failure modes for TSFMs.** The finding that RevIN hurts on in-domain data (-5.6%), weather (-10.8%), and autocorrelation (-7.0%) is novel and practically important. Practitioners currently apply RevIN by default — our results show this can be actively harmful.
+
+Possible framing: *"When Does Normalization Help? A Systematic Study of Test-Time Preprocessing for Time Series Foundation Models"*
+
+### Recommended Next Steps
+
+1. **Workshop paper** at NeurIPS 2026 Time Series Workshop or ICML PUT Workshop focusing on the analysis contribution
+2. **Expand analysis** to 3+ FMs (Moirai, Sundial, TimesFM) to strengthen the normalization failure finding
+3. **If pursuing method further**: the embedding-level approach showed +8% on one seed in Round 3 — this direction is unexplored and could be the technical novelty for a future full paper
+
+---
+
+## Experiment History
+
+| Round | Model | Windows | Seeds | Key Finding |
+|-------|-------|---------|-------|-------------|
+| R1 | Chronos-T5-Tiny | 8 | 1 | +23.6% (variance artifact) |
+| R2 | Chronos-T5-Tiny | 30 | 3 | +1.1% best, nothing beats RevIN |
+| R3 | Chronos-T5-Tiny | 30 | 3 | RevIN fails on outlier (-14%), cross-dataset (-52%) |
+| **R4** | **Chronos-T5-Small** | **80** | **5** | **Ours: best worst-case (-1.4% vs -7.0%). Not enough for method paper.** |
 
 ## Setup
 
@@ -153,6 +125,6 @@ pip install transformers accelerate safetensors scipy
 pip install gluonts datasets pandas matplotlib einops tqdm
 pip install chronos-forecasting
 
-# Run Round 3 experiments (~3.5 hours)
-python run_round3.py
+# Run Round 4 (~16 hours on GPU)
+python run_round4.py
 ```
